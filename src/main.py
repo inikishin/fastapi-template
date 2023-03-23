@@ -5,14 +5,14 @@ from fastapi import FastAPI
 from fastapi.responses import ORJSONResponse
 
 from api.v1 import base
-from core import config
+from core.config import app_config
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title=config.PROJECT_NAME,
-    docs_url=config.DOCS_URL,
-    openapi_url=config.OPENAPI_URL,
+    title=app_config.project_title,
+    docs_url=app_config.project_docs_url,
+    openapi_url=app_config.project_openapi_url,
     default_response_class=ORJSONResponse,
 )
 
@@ -22,7 +22,7 @@ if __name__ == '__main__':
     logger.info('Start server...')
     uvicorn.run(
         'main:app',
-        host=config.PROJECT_HOST,
-        port=config.PROJECT_PORT,
+        host=app_config.project_host,
+        port=app_config.project_port,
         reload=True,
     )

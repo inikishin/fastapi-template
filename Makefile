@@ -7,6 +7,9 @@ run:
 lint:
 	.venv/bin/pre-commit run --all-files
 
+test:
+	.venv/bin/pytest
+
 migrate:
 	.venv/bin/alembic revision --autogenerate -m ${msg}
 

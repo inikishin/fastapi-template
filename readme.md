@@ -28,6 +28,12 @@ make lint
 Запуск линтеров.
 
 ```shell
+make test
+```
+
+Запуск тестов.
+
+```shell
 make migrate msg=migration-description
 ```
 

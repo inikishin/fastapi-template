@@ -1,9 +1,10 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from models.base import EchoResponse, EchoParamsResponse, EchoRequest
+from models.base import EchoResponse, EchoParamsResponse, EchoRequest, Entity
+from services.base import BaseEntityService, get_entity_service
 
 logger = logging.getLogger(__name__)
 TAG = ['template']
@@ -25,3 +26,11 @@ async def get_echo(name: str, age: int, sex: Optional[str] = None) -> EchoRespon
 async def post_echo(param: str, item: EchoRequest) -> EchoRequest:
     logger.info(param)
     return item
+
+
+@router.get("/entities", tags=TAG)
+async def read_entities(
+    genre_service: BaseEntityService = Depends(get_entity_service),
+) -> list[Entity]:
+    entities = await genre_service.get_entities()
+    return entities

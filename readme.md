@@ -20,3 +20,27 @@ make run
 ```
 
 Запуск сервера локально.
+
+```shell
+make migrate msg=migration-description
+```
+
+Создать автомиграцию с описанием из параметра msg
+
+```shell
+make upgrade
+```
+
+Применить все миграции
+
+```shell
+make downgrade
+```
+
+Откатить последнюю миграцию
+
+```shell
+make history
+```
+
+Показать историю миграций алембика

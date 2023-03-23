@@ -23,7 +23,6 @@ class EntityPostgresService(BaseEntityService):
         query = select(EntityDbModel)
         result = await self.session.execute(query)
         result = result.scalars()
-        print(result)
         return [Entity(title=item.title) for item in result]
 
 

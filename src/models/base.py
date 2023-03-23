@@ -17,3 +17,7 @@ class EchoParamsResponse(BaseModel):
 class EchoResponse(BaseModel):
     name: str
     params: EchoParamsResponse
+
+
+class Entity(BaseModel):
+    title: str

@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 
 from fastapi import Depends
-from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from db.config import get_session
 from db.models.entity import Entity as EntityDbModel

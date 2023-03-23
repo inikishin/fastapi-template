@@ -1,19 +1,17 @@
 import asyncio
-from logging.config import fileConfig
 import sys
+from logging.config import fileConfig
 
+from alembic import context
 from dotenv import load_dotenv
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from alembic import context
-
 load_dotenv()
-sys.path.append('./src')
+sys.path.append("./src")
 
-from core.config import app_config
+from core.config import app_config as cfg
 from db.config import Base
 from db.models.entity import Entity
 
@@ -21,8 +19,8 @@ from db.models.entity import Entity
 # access to the values within the .ini file in use.
 config = context.config
 
-DATABASE_URL=f'postgresql+asyncpg://{app_config.db_user}:{app_config.db_pass}@{app_config.db_host}:{app_config.db_port}/{app_config.db_name}'
-config.set_main_option('sqlalchemy.url', DATABASE_URL)
+DATABASE_URL = f"postgresql+asyncpg://{cfg.db_user}:{cfg.db_pass}@{cfg.db_host}:{cfg.db_port}/{cfg.db_name}"
+config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

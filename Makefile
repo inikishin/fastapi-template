@@ -4,6 +4,9 @@ install:
 run:
 	python src/main.py
 
+lint:
+	.venv/bin/pre-commit run --all-files
+
 migrate:
 	.venv/bin/alembic revision --autogenerate -m ${msg}
 

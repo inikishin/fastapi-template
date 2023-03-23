@@ -22,6 +22,12 @@ make run
 Запуск сервера локально.
 
 ```shell
+make lint
+```
+
+Запуск линтеров.
+
+```shell
 make migrate msg=migration-description
 ```
 

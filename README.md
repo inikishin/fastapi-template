@@ -15,14 +15,14 @@ Already a pro? Just edit this README.md and make it your own. Want to make it ea
 
 ```
 cd existing_repo
-git remote add origin https://pandora-research.gitlab.yandexcloud.net/templates/fastapi.git
+git remote add origin https://git.pandoraresearch.com/templates/fastapi.git
 git branch -M main
 git push -uf origin main
 ```
 
 ## Integrate with your tools
 
-- [ ] [Set up project integrations](https://pandora-research.gitlab.yandexcloud.net/templates/fastapi/-/settings/integrations)
+- [ ] [Set up project integrations](https://git.pandoraresearch.com/templates/fastapi/-/settings/integrations)
 
 ## Collaborate with your team
 

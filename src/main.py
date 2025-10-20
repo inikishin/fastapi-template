@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.responses import ORJSONResponse
 
 from api.v1 import base
-from core.config import app_config
+from config.settings import app_config
 
 logger = logging.getLogger(__name__)
 

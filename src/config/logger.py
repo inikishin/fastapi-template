@@ -9,7 +9,8 @@ class LoggerProvider:
 
     def __init__(self):
         linear_formatter = Formatter(
-            "%(asctime)s: %(levelname)s [%(threadName)s] [%(module)s] %(funcName)s(%(lineno)d): %(message)s", "%Y-%m-%d %H:%M:%S"
+            "%(asctime)s: %(levelname)s [%(threadName)s] [%(module)s] %(funcName)s(%(lineno)d): %(message)s",
+            "%Y-%m-%d %H:%M:%S",
         )
 
         self.console_handler = StreamHandler()

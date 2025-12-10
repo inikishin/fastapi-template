@@ -1,14 +1,17 @@
-install:
-	pip install -r requirements.txt
-
 run:
-	python src/main.py
+	uvicorn src.main:app --reload
 
-lint:
-	.venv/bin/pre-commit run --all-files
+lint-ruff:
+	pre-commit run --all-files ruff
+	pre-commit run --all-files ruff-format
+
+lint-mypy:
+	pre-commit run --all-files mypy
+
+lint: lint-ruff lint-mypy
 
 test:
-	.venv/bin/pytest
+	pytest
 
 migrate:
 	.venv/bin/alembic revision --autogenerate -m ${msg}

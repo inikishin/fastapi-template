@@ -58,7 +58,7 @@ The single source of truth for every environment variable is `src/config/setting
 | `db_user` | `"demo"` | `DB_USER` | Database user |
 | `db_pass` | `"demo"` | `DB_PASS` | Database password |
 | `db_show_queries` | `False` | `DB_SHOW_QUERIES` | Echo SQL to stdout (dev only) |
-| — | — | `DB_TEST_DATABASE_NAME` | Test database name (read directly in `tests/conftest.py`) |
+| `db_test_database_name` | `"template_test"` | `DB_TEST_DATABASE_NAME` | Test database name — `tests/conftest.py` reads it via `app_config` |
 
 ### What to verify / fix
 

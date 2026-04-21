@@ -23,6 +23,7 @@ class AppConfig(BaseSettings):
     db_user: str = "demo"
     db_pass: str = "demo"
     db_show_queries: bool = False
+    db_test_database_name: str = "template_test"
 
     @property
     def get_db_creds(self):

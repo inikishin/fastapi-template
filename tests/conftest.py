@@ -20,7 +20,7 @@ load_dotenv()
 
 from src.config.settings import app_config  # noqa: E402
 
-_TEST_DB_NAME = os.getenv("DB_TEST_DATABASE_NAME") or f"{app_config.db_name}_test"
+_TEST_DB_NAME = app_config.db_test_database_name or f"{app_config.db_name}_test"
 app_config.db_name = _TEST_DB_NAME
 
 _TEST_DB_CREDS = {

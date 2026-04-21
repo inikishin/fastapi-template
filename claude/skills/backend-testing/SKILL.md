@@ -1,866 +1,576 @@
 ---
 name: backend-testing
-description: Comprehensive backend testing for REST APIs, databases, authentication, and business logic across Jest, Pytest, and Mocha.
-  Covers unit tests for isolated functions, integration tests for API endpoints, and authentication/authorization flows with detailed examples for Express.js, FastAPI, and other frameworks. 
-  Includes test environment setup, mocking strategies for external dependencies, and database isolation patterns using in-memory or separate test databases.
-  Provides step-by-step guidance on AAA pattern (Arrange-Act-Assert), test fixtures, and role-based access control testing with JWT tokens.
-  Enforces test isolation, clear naming conventions, and coverage thresholds (default 80%) to prevent shared state issues and ensure reliable test execution
+description: Writing automated tests for the FastAPI + SQLAlchemy template using pytest, httpx.AsyncClient and a real PostgreSQL test database. The skill describes the fixtures shipped in tests/conftest.py (drop_create_db, async_test_session, client, async_session, mock_http_bearer), the generation and loading pipeline for tests/dump_data/, the tests/test_<layer>/test_<feature>/ folder layout, and the response contract defined in src/api/schemes.py. Coverage target is 70%.
 ---
 
-# Backend Testing
+# Backend Testing (pytest + FastAPI + PostgreSQL)
 
-## When to use this skill
+## Purpose
 
-Specific situations that should trigger this skill:
+This skill helps write automated tests that:
 
-* New feature development: Write tests first using TDD (Test-Driven Development)
-* Adding API endpoints: Test success and failure cases for REST APIs
-* Bug fixes: Add tests to prevent regressions
-* Before refactoring: Write tests that guarantee existing behavior
+- rely on the fixtures already provided by `tests/conftest.py` and **do not duplicate** them;
+- run against a real PostgreSQL test database, which is recreated once per
+  session from the Alembic migrations and **seeded from `tests/dump_data/`**;
+- verify the typed response bodies guaranteed by the `@catch_all_exceptions`
+  decorator and the `ResponseNNNSchema` classes in `src/api/schemes.py`;
+- are launched via `make test`, with coverage collected automatically
+  (target: 70%).
 
-## Input Format
+**Source of truth**: `tests/conftest.py`, `pytest.ini` and `.env.example`.
+If the skill diverges from those files, fix the **skill**, not the files.
 
-Format and required/optional information to collect from the user:
+------------------------------------------------------------------------
 
-### Required information
+## When to activate
 
-* Framework: Django, FastAPI, etc.
-* Test tool: Pytest, Mocha/Chai, etc.
-* Test target: API endpoints, business logic, DB operations, etc.
+- A new feature, endpoint, service, manager or helper → tests needed.
+- A bug has been fixed → add a regression test.
+- Before a refactor → freeze current behavior.
+- Coverage has dropped below 70%.
+- The user asks to «add tests», «cover X with tests», «write a test for Y».
 
-### Optional information
+------------------------------------------------------------------------
 
-* Database: PostgreSQL, MySQL, MongoDB (default: in-memory DB)
-* Mocking library: jest.mock, sinon, unittest.mock (default: framework built-in)
-* Coverage target: 80%, 90%, etc. (default: 70%)
-* E2E tool: Supertest, TestClient, RestAssured (optional)
+## What to ask the user
 
-### Input example
+1. **Target under test** — endpoint (`GET /api/v1/...`), service (`UserInfoService.get_user_by_id`), manager (`UserManager.get_users_by_filters`), helper.
+2. **Test level**:
+   - *integration* — through `client` (AsyncClient) against the real test database;
+   - *unit* — direct call with `async_session` (MagicMock).
+   - If not specified — default: integration for endpoints, unit for services/managers/helpers.
+3. **Test data**: is what already lives in `tests/dump_data/dumps/` enough, or is a new row/table required (see «Data dumps»)?
+4. **Scenarios**: at least happy path + one negative scenario (404/400/422/500).
+5. **Target coverage** — default 70%.
+
+------------------------------------------------------------------------
+
+## Template infrastructure (use, do not duplicate)
+
+### Dependencies
+
+`requirements-dev.txt` contains everything needed for tests and linters: `pytest`, `pytest-asyncio`, `pytest-cov`, `psycopg2-binary`, `httpx`, `pre-commit`. Install both runtime and dev dependencies in a single command:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+```
+
+### `.env` — dedicated test database name
 
 ```
-Test the user authentication endpoints for an Express.js API:
-- Framework: Express + TypeScript
-- Test tool: Jest + Supertest
-- Target: POST /auth/register, POST /auth/login
-- DB: PostgreSQL (in-memory for tests)
-- Coverage: 90% or above
+DB_TEST_DATABASE_NAME=template_test
 ```
 
-## Instructions
+If the variable is missing, conftest falls back to `<DB_NAME>_test`. **The test database lives on the same PostgreSQL instance as the production one**, under a different name. It is recreated **from scratch** on every `pytest` run.
 
-Step-by-step task order to follow precisely.
+### `pytest.ini`
 
-### Step 1: Set up the test environment
+- `asyncio_mode = auto` — `async def test_...` works without `@pytest.mark.asyncio`.
+- `asyncio_default_fixture_loop_scope = session` — required for session-scoped async fixtures (`async_test_session`, `client`).
+- `--strict-markers` — new markers must be registered in `pytest.ini`.
+- `--cov=src --cov-report html` — the HTML report is written to `htmlcov/index.html` on every run.
+- Marker `smoke` — pre-commit subset.
 
-Install and configure the test framework and tools.
+### Fixtures in `tests/conftest.py`
 
-#### Tasks:
+| Name | Scope | Purpose | Hits DB? |
+| --- | --- | --- | --- |
+| `drop_create_db` | session | Recreates the test database, runs `alembic upgrade head`, loads dumps from `tests/dump_data/` | Yes |
+| `async_test_session` | session | Real `AsyncSession` bound to the test database | Yes |
+| `client` | session | `httpx.AsyncClient` wrapping the FastAPI `app`; traffic goes into the real test database | Yes (via app) |
+| `async_session` | function | `MagicMock(spec=AsyncSession)` for unit tests | No |
+| `mock_http_bearer` | autouse | Patches `HTTPBearer.__call__` to return a fake token. Disabled per-test via the `@pytest.mark.no_auth_mock` marker | — |
 
-* Install test libraries
-* Configure test database (in-memory or separate DB)
-* Separate environment variables (.env.test)
-* Configure jest.config.js or pytest.ini
+**Rules:**
 
-#### Example (Node.js + Jest + Supertest):
+- Integration tests do **not** need to pass an `Authorization` header — `mock_http_bearer` handles it automatically.
+- `async_test_session` is one session for the whole run. Commits from one test are visible to the next. For isolated data, use a local fixture with `add()` + cleanup in the yield block (template below).
+- Nested `conftest.py` files in subdirectories — only when genuinely needed. They may extend the base conftest but must not override the fixtures listed above.
 
-`npm install --save-dev jest ts-jest @types/jest supertest @types/supertest`
+### Commands
 
-#### jest.config.js:
+```bash
+make test                                      # full run with coverage (html)
+pytest tests/test_api/test_user/               # a single directory
+pytest tests/test_api/test_user/test_user_api.py::test_get_user_by_id_returns_200
+pytest -m smoke                                # smoke subset only
+pytest --cov=src --cov-report term-missing     # missing lines in the console
+```
+
+------------------------------------------------------------------------
+
+## Layout of the `tests/` directory
 
 ```
-module.exports = {
-  preset: 'ts-jest',
-  testEnvironment: 'node',
-  roots: ['<rootDir>/src'],
-  testMatch: ['**/__tests__/**/*.test.ts'],
-  collectCoverageFrom: [
-    'src/**/*.ts',
-    '!src/**/*.d.ts',
-    '!src/__tests__/**'
-  ],
-  coverageThreshold: {
-    global: {
-      branches: 80,
-      functions: 80,
-      lines: 80,
-      statements: 80
+tests/
+├── __init__.py
+├── conftest.py                  # base fixtures — do not duplicate
+├── dump_data/                   # test database seed data
+│   ├── dump_data_setup.sql      # DISABLE TRIGGER ALL for every target table
+│   ├── dump_data_after.sql      # ENABLE TRIGGER ALL for every target table
+│   └── dumps/
+│       └── dump_<table>.json    # one file per table
+├── test_api/
+│   └── test_<feature>/
+│       ├── __init__.py
+│       └── test_<endpoint>.py
+├── test_services/
+│   └── <feature>/
+│       ├── __init__.py
+│       └── test_<file>.py
+├── test_managers/
+│   ├── __init__.py
+│   └── test_<entity>.py
+└── test_tasks/                  # background tasks (if any)
+    └── test_<task>.py
+```
+
+`src/` ↔ `tests/` mapping:
+
+| Artifact in `src/` | Test path |
+| --- | --- |
+| `src/api/v1/<feature>/views.py` | `tests/test_api/test_<feature>/test_<endpoint>.py` |
+| `src/services/<feature>/<file>.py` | `tests/test_services/<feature>/test_<file>.py` |
+| `src/models/managers/<entity>.py` | `tests/test_managers/test_<entity>.py` |
+| `src/utils/helpers.py` | `tests/test_utils/test_helpers.py` |
+
+**The API version (`v1`) is not repeated in test paths.** Tests are grouped by feature.
+
+Every test directory requires an empty `__init__.py`.
+
+**Reference file**: `tests/test_api/test_user/test_user_api.py`.
+
+------------------------------------------------------------------------
+
+## Data dumps (`tests/dump_data/`)
+
+### Principle: only the minimum data the tests actually need
+
+**Do not** mirror the production database into `tests/dump_data/dumps/`. The dump holds **only the tables and only the rows** the tests reference:
+
+- one or two happy-path rows per table,
+- plus targeted rows for edge cases (nullable fields, boundary values, FK relationships that a specific test exercises).
+
+Large dumps slow the suite, leak production data (PII, commercial info) into the repo, and turn debugging a failed test into archaeology. The rule is **every row in the dump must be justified by a specific test**. If you can remove a row and no test breaks — it should not be there.
+
+Before committing new dumps, ask yourself: «which tests break if I delete this file / this row?». If the answer is «none» — delete it.
+
+### How the loading pipeline works
+
+Inside `drop_create_db` (session scope) the following runs:
+
+1. Using `psycopg2`, connect to the `postgres` system database → `DROP DATABASE IF EXISTS` → `CREATE DATABASE` for the test DB.
+2. `alembic upgrade head` — the empty database receives the current schema. The database name comes from `app_config.db_name`, which is switched to `_TEST_DB_NAME` at the very top of conftest.
+3. `dump_data_setup.sql` → every table listed in the dumps is switched to `DISABLE TRIGGER ALL`.
+4. For each `dumps/dump_<table>.json`:
+   - read the array of objects;
+   - build a TSV stream in `io.StringIO`, `null` → `\N`;
+   - load it via `cursor.copy_from(stream, table, columns=fields)`.
+5. `dump_data_after.sql` → `ENABLE TRIGGER ALL` is restored.
+
+**JSON filename = table name**: `dump_<tablename>.json`. The table must exist in `src/models/dbo/models.py` (otherwise the migration will not create it and `copy_from` will fail).
+
+### Format of `dump_<table>.json`
+
+An array of objects; **every value is a string** (as it would appear after `COPY ... TO stdout`). NULL is written either as `null` (JSON) or `"\\N"` (string). Example for the `users` table:
+
+```json
+[
+  {
+    "id": "1",
+    "username": "admin",
+    "email": "admin@example.com",
+    "phone": null
+  }
+]
+```
+
+The keys of the first object define the column list used by `COPY` — **every object in the file must share the exact same key set**. Key order = column order.
+
+### How to generate a dump from a real database
+
+A one-off procedure. The converter script **is not stored in the project**, it lives in this skill: `claude/skills/backend-testing/prepare_sample_dump_for_tests.py`. Copy it **temporarily** into `tests/dump_data/`, run it, then delete it.
+
+```bash
+# 1. Temporarily place the utility into tests/dump_data/
+cp claude/skills/backend-testing/prepare_sample_dump_for_tests.py tests/dump_data/
+
+# 2. Take a data-only dump of ONLY the required tables (narrow -t list).
+#    Do not run pg_dump without -t — it would pull the whole database.
+pg_dump -h HOST -U USER -d DB --data-only \
+  -t users -t <other_table> \
+  -f tests/dump_data/dump_data.sql
+
+# 3. Convert into JSON + trigger SQL files
+cd tests/dump_data
+python prepare_sample_dump_for_tests.py
+
+# 4. Trim the generated dumps/dump_<table>.json files by hand:
+#    keep only the rows the tests actually need.
+
+# 5. Remove temporary artefacts
+rm dump_data.sql prepare_sample_dump_for_tests.py
+```
+
+Only `dumps/dump_<table>.json`, `dump_data_setup.sql` and `dump_data_after.sql` get committed. Neither the source `dump_data.sql` nor the script itself belong in `tests/dump_data/`.
+
+### Adding a tiny dump by hand (without pg_dump)
+
+When a test only needs a row or two and running pg_dump would be overkill:
+
+1. Add the table name to `dump_data_setup.sql` and `dump_data_after.sql`:
+   ```sql
+   -- dump_data_setup.sql
+   ALTER TABLE "public"."<table>" DISABLE TRIGGER ALL;
+   -- dump_data_after.sql
+   ALTER TABLE "public"."<table>" ENABLE TRIGGER ALL;
+   ```
+2. Create `dumps/dump_<table>.json` with rows (every value as a string, `null` for NULL).
+3. Run `pytest` — the new dump is picked up on the next `drop_create_db`.
+
+### Reference file
+
+`tests/dump_data/dumps/dump_users.json` — minimal one-row example.
+
+------------------------------------------------------------------------
+
+## API integration tests (`client`)
+
+Use the async `client` fixture from conftest; traffic reaches the real FastAPI `app` and the seeded test database.
+
+### Template — happy path
+
+```python
+async def test_get_user_by_id_returns_200(client):
+    response = await client.get("/api/v1/user/1")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": 1,
+        "username": "admin",
+        "email": "admin@example.com",
     }
-  },
-  setupFilesAfterEnv: ['<rootDir>/src/__tests__/setup.ts']
-};
 ```
 
-#### setup.ts (global test configuration):
+### Template — negative scenario
 
-```
-import { db } from '../database';
+```python
+async def test_get_user_by_id_not_found(client):
+    response = await client.get("/api/v1/user/999999")
 
-// Reset DB before each test
-beforeEach(async () => {
-  await db.migrate.latest();
-  await db.seed.run();
-});
-
-// Clean up after each test
-afterEach(async () => {
-  await db.migrate.rollback();
-});
-
-// Close connection after all tests complete
-afterAll(async () => {
-  await db.destroy();
-});
+    assert response.status_code == 404
+    body = response.json()
+    assert body["code"] == "404"
+    assert "User not found" in body["message"]
 ```
 
-### Step 2: Write Unit Tests (business logic)
+### Rules
 
-Write unit tests for individual functions and classes.
+- Test is `async def`, no `@pytest.mark.asyncio`.
+- Request is `await client.<method>(...)`.
+- Assert both `status_code` and the response body. For 4xx/5xx always check the `code` and `message` fields — they are guaranteed by `@catch_all_exceptions` from `src/utils/helpers.py`.
+- Do not pass an `Authorization` header — `mock_http_bearer` is autouse.
+- Pull test data from the dumps; if what you need is missing, see the local-fixture section below.
 
-#### Tasks:
+### Local fixture with create + cleanup
 
-* Test pure functions (no dependencies)
-* Isolate dependencies via mocking
-* Test edge cases (boundary values, exceptions)
-* AAA pattern (Arrange-Act-Assert)
+When a needed row is not in the dumps and you would rather not bloat the global dump:
 
-#### Decision criteria:
+```python
+from uuid import uuid4
 
-* No external dependencies (DB, API) -> pure Unit Test
-* External dependencies present -> use Mock/Stub
-* Complex logic -> test various input cases
-
-#### Example (password validation function):
-
-```
-// src/utils/password.ts
-export function validatePassword(password: string): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
-
-  if (password.length < 8) {
-    errors.push('Password must be at least 8 characters');
-  }
-
-  if (!/[A-Z]/.test(password)) {
-    errors.push('Password must contain uppercase letter');
-  }
-
-  if (!/[a-z]/.test(password)) {
-    errors.push('Password must contain lowercase letter');
-  }
-
-  if (!/\d/.test(password)) {
-    errors.push('Password must contain number');
-  }
-
-  if (!/[!@#$%^&*]/.test(password)) {
-    errors.push('Password must contain special character');
-  }
-
-  return { valid: errors.length === 0, errors };
-}
-
-// src/__tests__/utils/password.test.ts
-import { validatePassword } from '../../utils/password';
-
-describe('validatePassword', () => {
-  it('should accept valid password', () => {
-    const result = validatePassword('Password123!');
-    expect(result.valid).toBe(true);
-    expect(result.errors).toHaveLength(0);
-  });
-
-  it('should reject password shorter than 8 characters', () => {
-    const result = validatePassword('Pass1!');
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContain('Password must be at least 8 characters');
-  });
-
-  it('should reject password without uppercase', () => {
-    const result = validatePassword('password123!');
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContain('Password must contain uppercase letter');
-  });
-
-  it('should reject password without lowercase', () => {
-    const result = validatePassword('PASSWORD123!');
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContain('Password must contain lowercase letter');
-  });
-
-  it('should reject password without number', () => {
-    const result = validatePassword('Password!');
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContain('Password must contain number');
-  });
-
-  it('should reject password without special character', () => {
-    const result = validatePassword('Password123');
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContain('Password must contain special character');
-  });
-
-  it('should return multiple errors for invalid password', () => {
-    const result = validatePassword('pass');
-    expect(result.valid).toBe(false);
-    expect(result.errors.length).toBeGreaterThan(1);
-  });
-});
-```
-
-### Step 3: Integration Test (API endpoints)
-
-Write integration tests for API endpoints.
-
-#### Tasks:
-
-* Test HTTP requests/responses
-* Success cases (200, 201)
-* Failure cases (400, 401, 404, 500)
-* Authentication/authorization tests
-* Input validation tests
-
-#### Checklist:
-
-* Verify status code
-* Validate response body structure
-* Confirm database state changes
-* Validate error messages
-
-#### Example (Express.js + Supertest):
-
-```
-// src/__tests__/api/auth.test.ts
-import request from 'supertest';
-import app from '../../app';
-import { db } from '../../database';
-
-describe('POST /auth/register', () => {
-  it('should register new user successfully', async () => {
-    const response = await request(app)
-      .post('/api/auth/register')
-      .send({
-        email: 'test@example.com',
-        username: 'testuser',
-        password: 'Password123!'
-      });
-
-    expect(response.status).toBe(201);
-    expect(response.body).toHaveProperty('user');
-    expect(response.body).toHaveProperty('accessToken');
-    expect(response.body.user.email).toBe('test@example.com');
-
-    // Verify the record was actually saved to DB
-    const user = await db.user.findUnique({ where: { email: 'test@example.com' } });
-    expect(user).toBeTruthy();
-    expect(user.username).toBe('testuser');
-  });
-
-  it('should reject duplicate email', async () => {
-    // Create first user
-    await request(app)
-      .post('/api/auth/register')
-      .send({
-        email: 'test@example.com',
-        username: 'user1',
-        password: 'Password123!'
-      });
-
-    // Second attempt with same email
-    const response = await request(app)
-      .post('/api/auth/register')
-      .send({
-        email: 'test@example.com',
-        username: 'user2',
-        password: 'Password123!'
-      });
-
-    expect(response.status).toBe(409);
-    expect(response.body.error).toContain('already exists');
-  });
-
-  it('should reject weak password', async () => {
-    const response = await request(app)
-      .post('/api/auth/register')
-      .send({
-        email: 'test@example.com',
-        username: 'testuser',
-        password: 'weak'
-      });
-
-    expect(response.status).toBe(400);
-    expect(response.body.error).toBeDefined();
-  });
-
-  it('should reject missing fields', async () => {
-    const response = await request(app)
-      .post('/api/auth/register')
-      .send({
-        email: 'test@example.com'
-        // username, password omitted
-      });
-
-    expect(response.status).toBe(400);
-  });
-});
-
-describe('POST /auth/login', () => {
-  beforeEach(async () => {
-    // Create test user
-    await request(app)
-      .post('/api/auth/register')
-      .send({
-        email: 'test@example.com',
-        username: 'testuser',
-        password: 'Password123!'
-      });
-  });
-
-  it('should login with valid credentials', async () => {
-    const response = await request(app)
-      .post('/api/auth/login')
-      .send({
-        email: 'test@example.com',
-        password: 'Password123!'
-      });
-
-    expect(response.status).toBe(200);
-    expect(response.body).toHaveProperty('accessToken');
-    expect(response.body).toHaveProperty('refreshToken');
-    expect(response.body.user.email).toBe('test@example.com');
-  });
-
-  it('should reject invalid password', async () => {
-    const response = await request(app)
-      .post('/api/auth/login')
-      .send({
-        email: 'test@example.com',
-        password: 'WrongPassword123!'
-      });
-
-    expect(response.status).toBe(401);
-    expect(response.body.error).toContain('Invalid credentials');
-  });
-
-  it('should reject non-existent user', async () => {
-    const response = await request(app)
-      .post('/api/auth/login')
-      .send({
-        email: 'nonexistent@example.com',
-        password: 'Password123!'
-      });
-
-    expect(response.status).toBe(401);
-  });
-});
-```
-
-### Step 4: Authentication/Authorization Tests
-
-Test JWT tokens and role-based access control.
-
-#### Tasks:
-
-* Confirm 401 when accessing without a token
-* Confirm successful access with a valid token
-* Test expired token handling
-* Role-based permission tests
-
-#### Example:
-
-```
-describe('Protected Routes', () => {
-  let accessToken: string;
-  let adminToken: string;
-
-  beforeEach(async () => {
-    // Regular user token
-    const userResponse = await request(app)
-      .post('/api/auth/register')
-      .send({
-        email: 'user@example.com',
-        username: 'user',
-        password: 'Password123!'
-      });
-    accessToken = userResponse.body.accessToken;
-
-    // Admin token
-    const adminResponse = await request(app)
-      .post('/api/auth/register')
-      .send({
-        email: 'admin@example.com',
-        username: 'admin',
-        password: 'Password123!'
-      });
-    // Update role to 'admin' in DB
-    await db.user.update({
-      where: { email: 'admin@example.com' },
-      data: { role: 'admin' }
-    });
-    // Log in again to get a new token
-    const loginResponse = await request(app)
-      .post('/api/auth/login')
-      .send({
-        email: 'admin@example.com',
-        password: 'Password123!'
-      });
-    adminToken = loginResponse.body.accessToken;
-  });
-
-  describe('GET /api/auth/me', () => {
-    it('should return current user with valid token', async () => {
-      const response = await request(app)
-        .get('/api/auth/me')
-        .set('Authorization', `Bearer ${accessToken}`);
-
-      expect(response.status).toBe(200);
-      expect(response.body.user.email).toBe('user@example.com');
-    });
-
-    it('should reject request without token', async () => {
-      const response = await request(app)
-        .get('/api/auth/me');
-
-      expect(response.status).toBe(401);
-    });
-
-    it('should reject request with invalid token', async () => {
-      const response = await request(app)
-        .get('/api/auth/me')
-        .set('Authorization', 'Bearer invalid-token');
-
-      expect(response.status).toBe(403);
-    });
-  });
-
-  describe('DELETE /api/users/:id (Admin only)', () => {
-    it('should allow admin to delete user', async () => {
-      const targetUser = await db.user.findUnique({ where: { email: 'user@example.com' } });
-
-      const response = await request(app)
-        .delete(`/api/users/${targetUser.id}`)
-        .set('Authorization', `Bearer ${adminToken}`);
-
-      expect(response.status).toBe(200);
-    });
-
-    it('should forbid non-admin from deleting user', async () => {
-      const targetUser = await db.user.findUnique({ where: { email: 'user@example.com' } });
-
-      const response = await request(app)
-        .delete(`/api/users/${targetUser.id}`)
-        .set('Authorization', `Bearer ${accessToken}`);
-
-      expect(response.status).toBe(403);
-    });
-  });
-});
-```
-
-### Step 5: Mocking and Test Isolation
-
-Mock external dependencies to isolate tests.
-
-#### Tasks:
-
-* Mock external APIs
-* Mock email sending
-* Mock file system
-* Mock time-related functions
-
-#### Example (mocking an external API):
-
-```
-// src/services/emailService.ts
-export async function sendVerificationEmail(email: string, token: string): Promise<void> {
-  const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${process.env.SENDGRID_API_KEY}` },
-    body: JSON.stringify({
-      to: email,
-      subject: 'Verify your email',
-      html: `<a href="https://example.com/verify?token=${token}">Verify</a>`
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to send email');
-  }
-}
-
-// src/__tests__/services/emailService.test.ts
-import { sendVerificationEmail } from '../../services/emailService';
-
-// Mock fetch
-global.fetch = jest.fn();
-
-describe('sendVerificationEmail', () => {
-  beforeEach(() => {
-    (fetch as jest.Mock).mockClear();
-  });
-
-  it('should send email successfully', async () => {
-    (fetch as jest.Mock).mockResolvedValueOnce({
-      ok: true,
-      status: 200
-    });
-
-    await expect(sendVerificationEmail('test@example.com', 'token123'))
-      .resolves
-      .toBeUndefined();
-
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.sendgrid.com/v3/mail/send',
-      expect.objectContaining({
-        method: 'POST'
-      })
-    );
-  });
-
-  it('should throw error if email sending fails', async () => {
-    (fetch as jest.Mock).mockResolvedValueOnce({
-      ok: false,
-      status: 500
-    });
-
-    await expect(sendVerificationEmail('test@example.com', 'token123'))
-      .rejects
-      .toThrow('Failed to send email');
-  });
-});
-```
-
-### Output format
-
-Defines the exact format that outputs must follow.
-
-#### Basic structure
-
-```
-project/
-├── src/
-│   ├── __tests__/
-│   │   ├── setup.ts                 # Global test configuration
-│   │   ├── utils/
-│   │   │   └── password.test.ts     # Unit tests
-│   │   ├── services/
-│   │   │   └── emailService.test.ts
-│   │   └── api/
-│   │       ├── auth.test.ts         # Integration tests
-│   │       └── users.test.ts
-│   └── ...
-├── jest.config.js
-└── package.json
-```
-
-#### Test run scripts (package.json)
-
-```
-{
-  "scripts": {
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "test:ci": "jest --ci --coverage --maxWorkers=2"
-  }
-}
-```
-
-#### Coverage report
-
-`$ npm run test:coverage`
-
-```
---------------------------|---------|----------|---------|---------|
-File                      | % Stmts | % Branch | % Funcs | % Lines |
---------------------------|---------|----------|---------|---------|
-All files                 |   92.5  |   88.3   |   95.2  |   92.8  |
- auth/                    |   95.0  |   90.0   |  100.0  |   95.0  |
-  middleware.ts           |   95.0  |   90.0   |  100.0  |   95.0  |
-  routes.ts               |   95.0  |   90.0   |  100.0  |   95.0  |
- utils/                   |   90.0  |   85.0   |   90.0  |   90.0  |
-  password.ts             |   90.0  |   85.0   |   90.0  |   90.0  |
---------------------------|---------|----------|---------|---------|
-```
-
-### Constraints
-
-Rules and prohibitions that must be strictly followed.
-
-#### Required rules (MUST)
-
-* Test isolation: Each test must be runnable independently
-    * Reset state with beforeEach/afterEach
-    * Do not depend on test execution order
-
-* Clear test names: The name must convey what the test verifies
-    * ✅ 'should reject duplicate email'
-    * ❌ 'test1'
-
-* AAA pattern: Arrange (setup) - Act (execute) - Assert (verify) structure
-    * Improves readability
-    * Clarifies test intent
-
-#### Prohibited (MUST NOT)
-
-* No production DB: Tests must use a separate or in-memory DB
-    * Risk of losing real data
-    * Cannot isolate tests
-
-* No real external API calls: Mock all external services
-    * Removes network dependency
-    * Speeds up tests
-    * Reduces costs
-
-* No Sleep/Timeout abuse: Use fake timers for time-based tests
-    * jest.useFakeTimers()
-    * Prevents test slowdowns
-
-#### Security rules
-
-* No hardcoded secrets: Never hardcode API keys or passwords in test code
-* Separate environment variables: Use .env.test file
-
-## Examples
-
-### Example 1: Python FastAPI tests (Pytest)
-
-#### Situation: Testing a FastAPI REST API
-
-#### User request:
-
-`Test the user API built with FastAPI using pytest.`
-
-#### Final result:
-
-```
-# tests/conftest.py
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.main import app
-from app.database import Base, get_db
+from src.models.dbo.models import User
 
-# In-memory SQLite for tests
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-@pytest.fixture(scope="function")
-def db_session():
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=engine)
+@pytest.fixture
+async def extra_user(async_test_session: AsyncSession):
+    user = User(id=42, username="temp", email="temp@example.com")
+    async_test_session.add(user)
+    await async_test_session.commit()
 
-@pytest.fixture(scope="function")
-def client(db_session):
-    def override_get_db():
-        try:
-            yield db_session
-        finally:
-            db_session.close()
+    yield user
 
-    app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
-    app.dependency_overrides.clear()
+    await async_test_session.delete(user)
+    await async_test_session.commit()
 
-# tests/test_auth.py
-def test_register_user_success(client):
-    response = client.post("/auth/register", json={
-        "email": "test@example.com",
-        "username": "testuser",
-        "password": "Password123!"
-    })
 
-    assert response.status_code == 201
-    assert "access_token" in response.json()
-    assert response.json()["user"]["email"] == "test@example.com"
-
-def test_register_duplicate_email(client):
-    # First user
-    client.post("/auth/register", json={
-        "email": "test@example.com",
-        "username": "user1",
-        "password": "Password123!"
-    })
-
-    # Duplicate email
-    response = client.post("/auth/register", json={
-        "email": "test@example.com",
-        "username": "user2",
-        "password": "Password123!"
-    })
-
-    assert response.status_code == 409
-    assert "already exists" in response.json()["detail"]
-
-def test_login_success(client):
-    # Register
-    client.post("/auth/register", json={
-        "email": "test@example.com",
-        "username": "testuser",
-        "password": "Password123!"
-    })
-
-    # Login
-    response = client.post("/auth/login", json={
-        "email": "test@example.com",
-        "password": "Password123!"
-    })
+async def test_returns_temp_user(client, extra_user):
+    response = await client.get(f"/api/v1/user/{extra_user.id}")
 
     assert response.status_code == 200
-    assert "access_token" in response.json()
+    assert response.json()["username"] == "temp"
+```
 
-def test_protected_route_without_token(client):
-    response = client.get("/auth/me")
+Rationale: `async_test_session` is session-scoped, so changes are visible to every subsequent test. The local cleanup after `yield` guarantees that inserted rows do not leak into neighbouring tests.
+
+------------------------------------------------------------------------
+
+## Service unit tests
+
+A service composes managers. In unit tests the manager is replaced with an `AsyncMock`.
+
+```python
+from unittest.mock import AsyncMock
+
+from src.models.dbo.models import User
+from src.services.user.info import UserInfoService
+
+
+async def test_get_user_by_tg_chat_id_returns_first(async_session):
+    service = UserInfoService(db=async_session)
+    service.user_manager = AsyncMock()
+    service.user_manager.get_users_by_filters.return_value = [
+        User(id=1, username="a", email="a@a"),
+        User(id=2, username="b", email="b@b"),
+    ]
+
+    result = await service.get_user_by_tg_chat_id("12345")
+
+    assert result.id == 1
+    service.user_manager.get_users_by_filters.assert_awaited_once_with(tg_chat_id="12345")
+
+
+async def test_get_user_by_tg_chat_id_returns_none_when_empty(async_session):
+    service = UserInfoService(db=async_session)
+    service.user_manager = AsyncMock()
+    service.user_manager.get_users_by_filters.return_value = []
+
+    assert await service.get_user_by_tg_chat_id("12345") is None
+```
+
+Rules:
+
+- Instantiate the service directly; `async_session` from conftest is a mock and never hits the database.
+- Replace the manager by attribute assignment: `service.<name>_manager = AsyncMock()`.
+- Assert both the result and the manager call (`assert_awaited_once_with(...)`).
+- Tests are `async def`, no decorators.
+
+------------------------------------------------------------------------
+
+## Manager unit tests
+
+Tested with the `async_session` fixture.
+
+### Method using `session.get`
+
+```python
+from unittest.mock import AsyncMock
+
+from src.models.dbo.models import User
+from src.models.managers.user import UserManager
+
+
+async def test_get_user_by_id_found(async_session):
+    expected = User(id=1, username="x", email="x@x")
+    async_session.get = AsyncMock(return_value=expected)
+
+    manager = UserManager(db=async_session)
+    result = await manager.get_user_by_id(1)
+
+    assert result is expected
+    async_session.get.assert_awaited_once_with(User, 1)
+```
+
+### Method using `session.execute` + `scalars().all()`
+
+```python
+from unittest.mock import MagicMock
+
+
+async def test_get_users_by_filters(async_session):
+    users = [User(id=1, username="x", email="x@x")]
+
+    scalars = MagicMock()
+    scalars.all.return_value = users
+    result_proxy = MagicMock()
+    result_proxy.scalars.return_value = scalars
+    async_session.execute.return_value = result_proxy
+
+    manager = UserManager(db=async_session)
+    found = await manager.get_users_by_filters(username="x")
+
+    assert found == users
+    async_session.execute.assert_awaited_once()
+```
+
+### When a manager must be tested against the real database
+
+If a method relies on non-trivial SQL, relationship filtering, `joinedload`, etc. — write an integration test with `async_test_session`:
+
+```python
+async def test_get_user_by_id_from_real_db(async_test_session):
+    manager = UserManager(db=async_test_session)
+
+    user = await manager.get_user_by_id(1)
+
+    assert user is not None
+    assert user.username == "admin"
+```
+
+Such a test relies on the data from `dump_users.json`.
+
+------------------------------------------------------------------------
+
+## Errors and `@catch_all_exceptions`
+
+The decorator in `src/utils/helpers.py` catches `RequestValidationError`, `ValidationError`, `HTTPException`, `ClientDisconnect` and any unexpected exception, turning them into a `JSONResponse` with a `ResponseNNNSchema` body. Tests exploit this:
+
+| Scenario | How to trigger | Status | Body fields |
+| --- | --- | --- | --- |
+| Invalid path/query | `str` instead of `int` | 422 | `code`, `message`, `details` |
+| Invalid request body | Miss a required field | 400 | `code`, `message`, `details` |
+| Business not-found | Service returns `None` → `HTTPException(404)` | 404 | `code`, `message` |
+| Unexpected failure | Service raises an exception | 500 | `code`, `message` |
+
+------------------------------------------------------------------------
+
+## Authorization
+
+By default `mock_http_bearer` (autouse) feeds every test a fake Bearer token, so protected endpoints are reachable without a real `Authorization` header. To verify that authorization is **actually enabled** on an endpoint, the mock has to be disabled per-test.
+
+### Rule: a paired test for every protected endpoint
+
+If an endpoint requires authorization (declares `Depends(HTTPBearer())` or relies on an auth middleware), it **must ship with two tests**:
+
+1. **Authorized scenario** → `200` (or another success code).
+2. **Unauthorized scenario** → `401` (or `403`) with a typed body.
+
+This guards against a regression where, during a refactor, the `HTTPBearer()` dependency is inadvertently dropped from the endpoint — without the paired test, such a change would slip through unnoticed.
+
+For endpoints that are **deliberately open** (healthcheck, public dictionaries), the pair is not required — a single positive test is enough.
+
+### Template — authorized scenario
+
+Nothing extra is required, `mock_http_bearer` autouse already supplies the token:
+
+```python
+async def test_get_user_by_id_authenticated(client):
+    response = await client.get("/api/v1/user/1")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == 1
+```
+
+### Template — unauthorized scenario
+
+Tag the test with the `no_auth_mock` marker — the `mock_http_bearer` fixture skips the patch and the real `HTTPBearer` runs:
+
+```python
+import pytest
+
+
+@pytest.mark.no_auth_mock
+async def test_get_user_by_id_unauthenticated(client):
+    response = await client.get("/api/v1/user/1")
+
     assert response.status_code == 401
-
-def test_protected_route_with_token(client):
-    # Register and get token
-    register_response = client.post("/auth/register", json={
-        "email": "test@example.com",
-        "username": "testuser",
-        "password": "Password123!"
-    })
-    token = register_response.json()["access_token"]
-
-    # Access protected route
-    response = client.get("/auth/me", headers={
-        "Authorization": f"Bearer {token}"
-    })
-
-    assert response.status_code == 200
-    assert response.json()["email"] == "test@example.com"
+    body = response.json()
+    assert body["code"] == "401"
 ```
 
-## Best practices
+The marker is registered in `pytest.ini` (`no_auth_mock: disable autouse HTTPBearer mock ...`). Use it only for tests that check the unauthenticated flow.
 
-### Quality improvements
+### What we do NOT check here
 
-#### TDD (Test-Driven Development): Write tests before writing code
-* Clarifies requirements
-* Improves design
-* Naturally achieves high coverage
+- **Token validity** (signature, expiry, issuer, roles) — that is the responsibility of the security module / middleware of the service. These checks do not belong in the template layer; they will appear in the `report-microservice` skill and live alongside the auth module.
+- **Roles / permissions** — likewise, tested on the module that implements the role check, not on every endpoint.
 
-#### Given-When-Then pattern: Write tests in BDD style
+### When an endpoint uses data from the token in business logic
 
-```
-it('should return 404 when user not found', async () => {
-  // Given: a non-existent user ID
-  const nonExistentId = 'non-existent-uuid';
+If the endpoint extracts `user_id` from `HTTPAuthorizationCredentials` and feeds it into the logic, mock the **token-parsing dependency** (via `app.dependency_overrides`), not `HTTPBearer` itself. Keep `mock_http_bearer` enabled and inject the desired user through a dependency override.
 
-  // When: attempting to look up that user
-  const response = await request(app).get(`/users/${nonExistentId}`);
+------------------------------------------------------------------------
 
-  // Then: 404 response
-  expect(response.status).toBe(404);
-});
-```
+## Requirements and conventions
 
-#### Test Fixtures: Reusable test data
+- **Isolation.** Tests must not depend on execution order. Any writes into `async_test_session` go through a local fixture with cleanup.
+- **AAA.** Arrange / Act / Assert — the sections are explicitly visible.
+- **Test names.** `test_<subject>_<scenario>_<expected>` (e.g. `test_get_user_by_id_not_found`).
+- **One test = one behavior.** Three unrelated assertions → three tests.
+- **Happy path + negative scenario** — minimum per public method/endpoint.
+- **Async tests** — `async def`, no `@pytest.mark.asyncio`.
+- **Fixtures from conftest** — use them; do not duplicate or override.
+- **Service/manager tests** run against `async_session` (mock) — never touch the real database.
+- **Integration tests** use `client` and/or `async_test_session` — dumps provide the data.
+- **New dumps** — only for data actually required by a test; do not commit the raw `dump_data.sql`.
+- **Secrets and tokens** — never hardcoded.
+- **`smoke` marker** — reserved for critical happy paths of key endpoints.
 
-```
-const validUser = {
-  email: 'test@example.com',
-  username: 'testuser',
-  password: 'Password123!'
-};
-```
+------------------------------------------------------------------------
 
-#### Efficiency improvements
+## Coverage
 
-* Parallel execution: Speed up tests with Jest's --maxWorkers option
-* Snapshot Testing: Save snapshots of UI components or JSON responses
-* Coverage thresholds: Enforce minimum coverage in jest.config.js
+- **Project-wide target**: 70% (lines and branches).
+- Report — `htmlcov/index.html` after `make test`.
+- Console report with uncovered lines: `pytest --cov=src --cov-report term-missing`.
+- If a module drops below 70% — add tests or justify it in the PR.
+- For new code the same 70% baseline applies. Higher is welcome.
 
-## Common Issues
+------------------------------------------------------------------------
 
-### Issue 1: Test failures caused by shared state between tests
+## Pre-PR checklist
 
-#### Symptom: Passes individually but fails when run together
+1. Path and file name: `tests/test_<layer>/test_<feature>/test_<source_stem>.py`.
+2. Fixtures from `tests/conftest.py` are reused, not duplicated.
+3. Async tests are `async def` without decorators.
+4. Each endpoint has at least one happy path and one failure case.
+5. If the endpoint is protected by authorization — it has **both** an authorized test **and** an unauthorized one (the latter with `@pytest.mark.no_auth_mock` → expected 401/403).
+6. Response body is asserted (not only `status_code`); for 4xx/5xx — `code` / `message` fields.
+7. New database rows are created either through a local fixture with cleanup **or** by extending `tests/dump_data/dumps/`.
+8. The raw `dump_data.sql` is not committed; `dump_data_setup.sql` and `dump_data_after.sql` cover every target table.
+9. `make test` is green, coverage ≥ 70%.
+10. `make lint` passes.
 
-#### Cause: DB state shared due to missing beforeEach/afterEach
+------------------------------------------------------------------------
 
-#### Fix:
+## Common issues
 
-```
-beforeEach(async () => {
-  await db.migrate.rollback();
-  await db.migrate.latest();
-});
-```
+### A test only fails when run with others
 
-### Issue 2: "Jest did not exit one second after the test run"
+Residual changes in `async_test_session` from a neighbour test. Use a local fixture with cleanup in the `yield` block.
 
-#### Symptom: Process does not exit after tests complete
+### `RuntimeError: Event loop is closed`
 
-#### Cause: DB connections, servers, etc. not cleaned up
+Fixture scopes mismatch. `pytest.ini` must set `asyncio_default_fixture_loop_scope = session`. Do not call `asyncio.run()` from inside a test.
 
-#### Fix:
+### `psycopg2.OperationalError: database "template_test" does not exist`
 
-```
-afterAll(async () => {
-  await db.destroy();
-  await server.close();
-});
-```
+`drop_create_db` did not run. Check: PostgreSQL is up, the user has `CREATE DATABASE` permission, `.env` has `DB_HOST/DB_PORT/DB_USER/DB_PASS` and `DB_TEST_DATABASE_NAME`.
 
-### Issue 3: Async test timeout
+### `psycopg2.errors.UndefinedTable: relation "<table>" does not exist`
 
-#### Symptom: "Timeout - Async callback was not invoked"
+`dump_<table>.json` exists but the model/migration does not. First create the ORM model, generate a migration, make sure `alembic upgrade head` succeeds on an empty database, then rerun the tests.
 
-#### Cause: Missing async/await or unhandled Promise
+### `psycopg2.errors.InvalidTextRepresentation: invalid input syntax for type ...`
 
-#### Fix:
+The string representation in `dump_<table>.json` does not match the column type (e.g. `"true"` for a `boolean` should be `"t"` or `"true"`; timestamps must be `YYYY-MM-DD HH:MM:SS+03`). The easiest fix is to sample a valid representation via `pg_dump --data-only` on a working database.
 
-```
-// Bad
-it('should work', () => {
-  request(app).get('/users');  // Promise not handled
-});
+### An endpoint test returns 500 instead of the expected 4xx
 
-// Good
-it('should work', async () => {
-  await request(app).get('/users');
-});
-```
+Verify that the endpoint is wrapped with `@catch_all_exceptions` and that `get_responses(ResponseGroup.ALL_ERRORS)` is spread into the `responses=` mapping.
 
-## References
+### `401 / 403` on a protected endpoint
 
-### Official docs
+`mock_http_bearer` did not apply. Common causes: a nested `conftest.py` overrode the fixture; `autouse=False` was set by mistake.
 
-* [Jest Documentation](https://jestjs.io/docs/getting-started)
-* [Pytest Documentation](https://docs.pytest.org/)
-* [Supertest GitHub](https://github.com/visionmedia/supertest)
+### `AttributeError: 'coroutine' object has no attribute ...`
 
-### Learning resources
+A plain `MagicMock` was used where `AsyncMock` is required. For awaitables use `AsyncMock`; return a plain `MagicMock` representing the result object via `.return_value`.
 
-* [Testing JavaScript with Kent C. Dodds](https://testingjavascript.com/)
-* [Test-Driven Development by Example (Kent Beck)](https://www.amazon.com/Test-Driven-Development-Kent-Beck/dp/0321146530)
+------------------------------------------------------------------------
 
-### Tools
+## Reference files in the template
 
-* [Istanbul/nyc](https://istanbul.js.org/) - code coverage
-* [nock](https://github.com/nock/nock) - HTTP mocking
-* [faker.js](https://fakerjs.dev/) - test data generation
-
-## Metadata
-### Version
-
-* Current version: 1.0.0
-* Last updated: 2025-01-01
-* Compatible platforms: Claude, ChatGPT, Gemini
-
-### Related skills
-
-* api-design: Design APIs alongside tests
-* authentication-setup: Test authentication systems
-
-### Tags
-
-#testing #backend #Jest #Pytest #unit-test #integration-test #TDD #API-test
+- `tests/conftest.py` — all base fixtures and the `app_config.db_name` override.
+- `tests/dump_data/dump_data_setup.sql` / `dump_data_after.sql` — DISABLE/ENABLE TRIGGER ALL.
+- `tests/dump_data/dumps/dump_users.json` — minimal dump example.
+- `claude/skills/backend-testing/prepare_sample_dump_for_tests.py` — one-off `pg_dump → JSON` converter. Not stored in the project; copied into `tests/dump_data/` only while preparing a dump.
+- `tests/test_api/test_user/test_user_api.py` — endpoint integration test.
+- `src/api/v1/user/views.py` — endpoint using `@catch_all_exceptions` + `get_responses`.
+- `src/services/user/info.py` — service composing a manager.
+- `src/models/managers/user.py` — CRUD manager.
+- `src/utils/helpers.py` — `catch_all_exceptions`, `get_responses`, `get_pagination_info`.
+- `src/api/schemes.py` — `ResponseNNNSchema`, `ResponseGroup`, `RESPONSE_SCHEMAS`.

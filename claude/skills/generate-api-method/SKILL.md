@@ -1,5 +1,5 @@
 ---
-name: generatу-api-method
+name: generate-api-method
 description: Creates API methods with Pydantic schemas, service layer, and route handlers following project conventions. Triggers on API endpoint specifications with HTTP method, URL path, request/response schemas, and service information.
 ---
 

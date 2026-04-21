@@ -170,8 +170,16 @@ async def client(drop_create_db):
 
 
 @pytest.fixture(autouse=True)
-def mock_http_bearer(monkeypatch):
-    """Every test gets an automatic Bearer token; HTTPBearer is not enforced."""
+def mock_http_bearer(request, monkeypatch):
+    """
+    By default every test gets an automatic Bearer token, so protected
+    endpoints are reachable without a real Authorization header.
+    Mark a test with @pytest.mark.no_auth_mock to skip this patch and
+    exercise the real unauthenticated flow (expected 401/403).
+    """
+    if request.node.get_closest_marker("no_auth_mock"):
+        yield
+        return
 
     async def fake_http_bearer_call(self, request):
         return HTTPAuthorizationCredentials(scheme="Bearer", credentials="fake-token")

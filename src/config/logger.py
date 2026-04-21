@@ -3,8 +3,8 @@ from logging import Formatter, StreamHandler, Logger, INFO
 
 class LoggerProvider:
     """
-    Вспомогательный класс для получения логера. Применяет базовые настройки к
-    встроенному логеру и возвращает инстанс логера с указанным названием.
+    Helper class for obtaining a logger. Applies base settings to the standard
+    logger and returns an instance with the given name.
     """
 
     def __init__(self):

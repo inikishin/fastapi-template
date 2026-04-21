@@ -2,3 +2,5 @@
 .env
 htmlcov
 /.coverage
+/CLAUDE.md
+/.claude

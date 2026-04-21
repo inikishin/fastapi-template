@@ -273,8 +273,8 @@ class NamedEntitySchema(BaseModel):
 
 
 class Code1cSchema(BaseModel):
-    code_1c: Optional[str] = Field(None, description="Код 1С")
-    name: Optional[str] = Field(None, description="Название")
+    code_1c: Optional[str] = Field(None, description="1C code")
+    name: Optional[str] = Field(None, description="Name")
 
 
 class PositionBaseFilters(BaseModel):

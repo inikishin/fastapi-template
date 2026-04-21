@@ -1,0 +1,1 @@
+ALTER TABLE "public"."users" ENABLE TRIGGER ALL;

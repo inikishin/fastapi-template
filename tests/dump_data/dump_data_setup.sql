@@ -1,0 +1,1 @@
+ALTER TABLE "public"."users" DISABLE TRIGGER ALL;

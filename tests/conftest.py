@@ -41,6 +41,7 @@ from sqlalchemy.engine import URL  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
 from unittest.mock import AsyncMock, MagicMock  # noqa: E402
 
+from src.config.postgres.db_config import get_session  # noqa: E402
 from src.main import app  # noqa: E402
 
 
@@ -115,25 +116,41 @@ def drop_create_db():
 
 
 @pytest.fixture(scope="session")
-async def async_test_session(drop_create_db):
+async def test_engine(drop_create_db):
     """
-    Session-scoped AsyncSession bound to the test database seeded with dumps.
-    A single session for the whole run: commits from one test are visible to
-    the next. For isolated data, create a local fixture with add() and cleanup
-    in the yield block.
+    Session-scoped async engine bound to the test database and to the session
+    event loop. Both async_test_session and the client fixture share it so
+    every DB-touching coroutine lives in the same loop — otherwise asyncpg
+    raises "Task got Future attached to a different loop".
     """
     database_url = URL.create(**_TEST_DB_CREDS)
-    async_engine = create_async_engine(
+    engine = create_async_engine(
         database_url,
         pool_pre_ping=True,
         pool_size=15,
         max_overflow=30,
         pool_timeout=100.0,
     )
-    async_session_maker = async_sessionmaker(async_engine, expire_on_commit=False, class_=AsyncSession)
-    async with async_session_maker() as session:
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def test_session_maker(test_engine):
+    """Session-scoped async_sessionmaker over the test engine."""
+    return async_sessionmaker(test_engine, expire_on_commit=False, class_=AsyncSession)
+
+
+@pytest.fixture(scope="session")
+async def async_test_session(test_session_maker):
+    """
+    Session-scoped AsyncSession bound to the test database seeded with dumps.
+    A single session for the whole run: commits from one test are visible to
+    the next. For isolated data, create a local fixture with add() and cleanup
+    in the yield block.
+    """
+    async with test_session_maker() as session:
         yield session
-    await async_engine.dispose()
 
 
 @pytest.fixture
@@ -147,14 +164,24 @@ def async_session():
 
 
 @pytest.fixture(scope="session")
-async def client(drop_create_db):
+async def client(test_session_maker):
     """
-    AsyncClient for API integration tests. Hits the real FastAPI app, which is
-    connected to the test database populated from dumps.
+    AsyncClient for API integration tests. Hits the real FastAPI app; `get_session`
+    is overridden to serve sessions from the test engine so every DB access
+    happens in the same session event loop.
     """
+
+    async def _override_get_session():
+        async with test_session_maker() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = _override_get_session
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
+
+    app.dependency_overrides.pop(get_session, None)
 
 
 @pytest.fixture(autouse=True)

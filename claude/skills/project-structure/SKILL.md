@@ -70,7 +70,7 @@ The root holds supporting artefacts only. **No Python business code lives in the
 
 | Item | Purpose |
 | --- | --- |
-| `README.md`, `CHANGELOG.md`, `setup.md`, `CLAUDE.md` | Documentation |
+| `README.md`, `CHANGELOG.md` | Documentation |
 | `Dockerfile`, `docker-compose*.yml` | Containerisation |
 | `Makefile` | Unified command set |
 | `alembic.ini` | Alembic configuration |

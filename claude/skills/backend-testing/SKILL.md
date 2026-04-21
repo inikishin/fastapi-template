@@ -189,11 +189,11 @@ The keys of the first object define the column list used by `COPY` — **every o
 
 ### How to generate a dump from a real database
 
-A one-off procedure. The converter script **is not stored in the project**, it lives in this skill: `claude/skills/backend-testing/prepare_sample_dump_for_tests.py`. Copy it **temporarily** into `tests/dump_data/`, run it, then delete it.
+A one-off procedure. The converter script **is not stored in the project**, it lives in this skill: `claude/skills/backend-testing/assets/prepare_sample_dump_for_tests.py`. Copy it **temporarily** into `tests/dump_data/`, run it, then delete it.
 
 ```bash
 # 1. Temporarily place the utility into tests/dump_data/
-cp claude/skills/backend-testing/prepare_sample_dump_for_tests.py tests/dump_data/
+cp claude/skills/backend-testing/assets/prepare_sample_dump_for_tests.py tests/dump_data/
 
 # 2. Take a data-only dump of ONLY the required tables (narrow -t list).
 #    Do not run pg_dump without -t — it would pull the whole database.
@@ -567,7 +567,7 @@ A plain `MagicMock` was used where `AsyncMock` is required. For awaitables use `
 - `tests/conftest.py` — all base fixtures and the `app_config.db_name` override.
 - `tests/dump_data/dump_data_setup.sql` / `dump_data_after.sql` — DISABLE/ENABLE TRIGGER ALL.
 - `tests/dump_data/dumps/dump_users.json` — minimal dump example.
-- `claude/skills/backend-testing/prepare_sample_dump_for_tests.py` — one-off `pg_dump → JSON` converter. Not stored in the project; copied into `tests/dump_data/` only while preparing a dump.
+- `claude/skills/backend-testing/assets/prepare_sample_dump_for_tests.py` — one-off `pg_dump → JSON` converter. Not stored in the project; copied into `tests/dump_data/` only while preparing a dump.
 - `tests/test_api/test_user/test_user_api.py` — endpoint integration test.
 - `src/api/v1/user/views.py` — endpoint using `@catch_all_exceptions` + `get_responses`.
 - `src/services/user/info.py` — service composing a manager.

@@ -66,13 +66,8 @@ def drop_create_db():
     conn.autocommit = True
     with conn.cursor() as cursor:
         cursor.execute(f'DROP DATABASE IF EXISTS "{_TEST_DB_NAME}"')
-        cursor.execute(
-            f'CREATE DATABASE "{_TEST_DB_NAME}" WITH OWNER "{_TEST_DB_CREDS["username"]}"'
-        )
-        cursor.execute(
-            f'GRANT ALL PRIVILEGES ON DATABASE "{_TEST_DB_NAME}" '
-            f'TO "{_TEST_DB_CREDS["username"]}"'
-        )
+        cursor.execute(f'CREATE DATABASE "{_TEST_DB_NAME}" WITH OWNER "{_TEST_DB_CREDS["username"]}"')
+        cursor.execute(f'GRANT ALL PRIVILEGES ON DATABASE "{_TEST_DB_NAME}" TO "{_TEST_DB_CREDS["username"]}"')
     conn.close()
 
     alembic_cfg = Config("alembic.ini")
@@ -104,12 +99,7 @@ def drop_create_db():
         fields = [field.strip() for field in rows[0]]
         stream = io.StringIO()
         for row in rows:
-            stream.write(
-                "\t".join(
-                    ["\\N" if row.get(field) is None else str(row[field]) for field in fields]
-                )
-                + "\n"
-            )
+            stream.write("\t".join(["\\N" if row.get(field) is None else str(row[field]) for field in fields]) + "\n")
         stream.seek(0)
         cursor.copy_from(stream, table, columns=fields)
     test_conn.commit()
@@ -140,9 +130,7 @@ async def async_test_session(drop_create_db):
         max_overflow=30,
         pool_timeout=100.0,
     )
-    async_session_maker = async_sessionmaker(
-        async_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    async_session_maker = async_sessionmaker(async_engine, expire_on_commit=False, class_=AsyncSession)
     async with async_session_maker() as session:
         yield session
     await async_engine.dispose()

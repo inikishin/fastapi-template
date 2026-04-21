@@ -64,10 +64,7 @@ class ReportClient:
             )
 
         if response.status_code >= 400:
-            log.error(
-                f"Raport API {method} {path} failed: "
-                f"status={response.status_code} body={response.text[:500]}"
-            )
+            log.error(f"Raport API {method} {path} failed: status={response.status_code} body={response.text[:500]}")
             raise ReportApiError(response.status_code, response.text[:500])
 
         return response.json()
@@ -80,28 +77,18 @@ class ReportClient:
         return await self._request("GET", "/api/v1/projects", params=params)
 
     async def get_project_structure(self, project_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/projects/{project_id}/structure", params=params
-        )
+        return await self._request("GET", f"/api/v1/projects/{project_id}/structure", params=params)
 
     async def list_project_queues(self, project_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/projects/{project_id}/queues", params=params
-        )
+        return await self._request("GET", f"/api/v1/projects/{project_id}/queues", params=params)
 
     async def list_queue_construction_objects(self, queue_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/queues/{queue_id}/construction-objects", params=params
-        )
+        return await self._request("GET", f"/api/v1/queues/{queue_id}/construction-objects", params=params)
 
     async def list_queue_housings(self, queue_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/queues/{queue_id}/housings", params=params
-        )
+        return await self._request("GET", f"/api/v1/queues/{queue_id}/housings", params=params)
 
-    async def list_construction_object_housings(
-        self, construction_object_id: UUID, **params: Any
-    ) -> Any:
+    async def list_construction_object_housings(self, construction_object_id: UUID, **params: Any) -> Any:
         return await self._request(
             "GET",
             f"/api/v1/construction-objects/{construction_object_id}/housings",
@@ -109,13 +96,9 @@ class ReportClient:
         )
 
     async def get_housing_structure(self, housing_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/housings/{housing_id}/structure", params=params
-        )
+        return await self._request("GET", f"/api/v1/housings/{housing_id}/structure", params=params)
 
-    async def get_housing_structure_with_contractors(
-        self, housing_id: UUID, **params: Any
-    ) -> Any:
+    async def get_housing_structure_with_contractors(self, housing_id: UUID, **params: Any) -> Any:
         return await self._request(
             "GET",
             f"/api/v1/housings/{housing_id}/structure-with-contractors",
@@ -123,14 +106,10 @@ class ReportClient:
         )
 
     async def list_housing_sections(self, housing_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/housings/{housing_id}/sections", params=params
-        )
+        return await self._request("GET", f"/api/v1/housings/{housing_id}/sections", params=params)
 
     async def list_section_floors(self, section_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/sections/{section_id}/floors", params=params
-        )
+        return await self._request("GET", f"/api/v1/sections/{section_id}/floors", params=params)
 
     # ------------------------------------------------------------------
     # Chain 2 — Contractor → Contract
@@ -140,18 +119,12 @@ class ReportClient:
         return await self._request("GET", "/api/v1/contractors", params=params)
 
     async def list_project_contractors(self, project_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/contractors/project/{project_id}", params=params
-        )
+        return await self._request("GET", f"/api/v1/contractors/project/{project_id}", params=params)
 
     async def list_queue_contractors(self, queue_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/queues/{queue_id}/contractors", params=params
-        )
+        return await self._request("GET", f"/api/v1/queues/{queue_id}/contractors", params=params)
 
-    async def list_construction_object_contractors(
-        self, construction_object_id: UUID, **params: Any
-    ) -> Any:
+    async def list_construction_object_contractors(self, construction_object_id: UUID, **params: Any) -> Any:
         return await self._request(
             "GET",
             f"/api/v1/construction-objects/{construction_object_id}/contractors",
@@ -159,26 +132,16 @@ class ReportClient:
         )
 
     async def list_housing_contractors(self, housing_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/housings/{housing_id}/contractors", params=params
-        )
+        return await self._request("GET", f"/api/v1/housings/{housing_id}/contractors", params=params)
 
     async def list_section_contractors(self, section_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/sections/{section_id}/contractors", params=params
-        )
+        return await self._request("GET", f"/api/v1/sections/{section_id}/contractors", params=params)
 
     async def list_floor_contractors(self, floor_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/floors/{floor_id}/contractors", params=params
-        )
+        return await self._request("GET", f"/api/v1/floors/{floor_id}/contractors", params=params)
 
-    async def list_contractor_contracts(
-        self, contractor_id: UUID, **params: Any
-    ) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/contractors/{contractor_id}/contracts/", params=params
-        )
+    async def list_contractor_contracts(self, contractor_id: UUID, **params: Any) -> Any:
+        return await self._request("GET", f"/api/v1/contractors/{contractor_id}/contracts/", params=params)
 
     async def list_project_contractor_contracts(
         self,
@@ -196,9 +159,7 @@ class ReportClient:
     # Chain 3 — Work Set → Work Group → Work Type → Work
     # ------------------------------------------------------------------
 
-    async def list_construction_object_work_sets(
-        self, construction_object_id: UUID, **params: Any
-    ) -> Any:
+    async def list_construction_object_work_sets(self, construction_object_id: UUID, **params: Any) -> Any:
         return await self._request(
             "GET",
             f"/api/v1/construction-objects/{construction_object_id}/work-sets",
@@ -206,38 +167,26 @@ class ReportClient:
         )
 
     async def list_work_set_work_groups(self, work_set_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/work-sets/{work_set_id}/work-groups", params=params
-        )
+        return await self._request("GET", f"/api/v1/work-sets/{work_set_id}/work-groups", params=params)
 
     async def list_work_groups(self, **params: Any) -> Any:
         return await self._request("GET", "/api/v1/work-groups", params=params)
 
     async def list_housing_work_groups(self, housing_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/housings/{housing_id}/work-groups", params=params
-        )
+        return await self._request("GET", f"/api/v1/housings/{housing_id}/work-groups", params=params)
 
-    async def list_contractor_work_groups(
-        self, contractor_id: UUID, **params: Any
-    ) -> Any:
+    async def list_contractor_work_groups(self, contractor_id: UUID, **params: Any) -> Any:
         return await self._request(
             "GET",
             f"/api/v1/contractors/{contractor_id}/work-groups/",
             params=params,
         )
 
-    async def list_work_group_work_types(
-        self, work_group_id: UUID, **params: Any
-    ) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/work-groups/{work_group_id}/work-types", params=params
-        )
+    async def list_work_group_work_types(self, work_group_id: UUID, **params: Any) -> Any:
+        return await self._request("GET", f"/api/v1/work-groups/{work_group_id}/work-types", params=params)
 
     async def list_work_type_works(self, work_type_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/work-types/{work_type_id}/works", params=params
-        )
+        return await self._request("GET", f"/api/v1/work-types/{work_type_id}/works", params=params)
 
     async def get_works_structure(self, **params: Any) -> Any:
         return await self._request("GET", "/api/v1/works/structure", params=params)
@@ -250,25 +199,13 @@ class ReportClient:
         return await self._request("GET", "/api/v1/positions/", params=params)
 
     async def list_work_set_positions(self, work_set_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/work-sets/{work_set_id}/positions", params=params
-        )
+        return await self._request("GET", f"/api/v1/work-sets/{work_set_id}/positions", params=params)
 
-    async def list_work_group_positions(
-        self, work_group_id: UUID, **params: Any
-    ) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/work-groups/{work_group_id}/positions", params=params
-        )
+    async def list_work_group_positions(self, work_group_id: UUID, **params: Any) -> Any:
+        return await self._request("GET", f"/api/v1/work-groups/{work_group_id}/positions", params=params)
 
-    async def list_work_type_positions(
-        self, work_type_id: UUID, **params: Any
-    ) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/work-types/{work_type_id}/positions", params=params
-        )
+    async def list_work_type_positions(self, work_type_id: UUID, **params: Any) -> Any:
+        return await self._request("GET", f"/api/v1/work-types/{work_type_id}/positions", params=params)
 
     async def list_work_positions(self, work_id: UUID, **params: Any) -> Any:
-        return await self._request(
-            "GET", f"/api/v1/works/{work_id}/positions", params=params
-        )
+        return await self._request("GET", f"/api/v1/works/{work_id}/positions", params=params)

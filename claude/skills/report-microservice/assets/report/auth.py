@@ -43,13 +43,8 @@ async def get_report_access_token() -> str:
         response = await http.post(token_url, data=payload)
 
     if response.status_code != 200:
-        log.error(
-            "Report Keycloak token request failed: "
-            f"status={response.status_code} body={response.text[:500]}"
-        )
-        raise ReportAuthError(
-            f"Keycloak returned {response.status_code} while issuing the Raport token"
-        )
+        log.error(f"Report Keycloak token request failed: status={response.status_code} body={response.text[:500]}")
+        raise ReportAuthError(f"Keycloak returned {response.status_code} while issuing the Raport token")
 
     token = response.json().get("access_token")
     if not token:

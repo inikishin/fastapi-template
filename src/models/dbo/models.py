@@ -1,6 +1,5 @@
 import sqlalchemy.orm as orm
-from sqlalchemy import Column, Integer, DateTime, String, ForeignKey
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String
 
 Base = orm.declarative_base()
 
@@ -12,4 +11,3 @@ class User(Base):  # type: ignore
     username = Column(String)
     email = Column(String)
     phone = Column(String)
-

@@ -1,8 +1,13 @@
 line-length = 120
 
+# Skill assets live in claude/ as templates copied into the project on demand
+# and may reference optional dependencies that are not installed in the
+# template's base environment — keep them out of the linter scope.
+extend-exclude = ["claude"]
+
 [lint]
 extend-select = ["E501"]
 
 [lint.per-file-ignores]
-# для игнорирования неиспользуемых импортов
+# Allow re-exports without "used" warnings in package __init__.py files
 "__init__.py" = ["F401", "F403"]

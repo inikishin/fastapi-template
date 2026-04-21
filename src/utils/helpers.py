@@ -13,11 +13,14 @@ from typing import (
 
 from fastapi import (
     HTTPException,
+    Query,
     status,
 )
 from fastapi.exceptions import RequestValidationError
 
 from pydantic import ValidationError, BaseModel
+
+from sqlalchemy import Enum as SQLAlchemyEnum, Select, String, cast
 
 from starlette.requests import ClientDisconnect
 from starlette.responses import JSONResponse
@@ -140,6 +143,34 @@ def catch_all_exceptions(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitab
             )
 
     return t_cast(Callable[P, Awaitable[JSONResponse | R]], wrapper)
+
+
+def pagination_params(
+    page: int = Query(1, ge=1, description="Page number (1 or greater)"),
+    per_page: int = Query(100, ge=1, description="Items per page (1 or greater)"),
+) -> PaginationParams:
+    """Validate and build PaginationParams from query string."""
+    if page < 1 or per_page < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Page and per_page must be greater than 0",
+        )
+    return PaginationParams(page=page, per_page=per_page)
+
+
+def get_paginated_query(query: Select, pagination: PaginationParams) -> Select:
+    """Apply LIMIT/OFFSET to a SQLAlchemy Select based on PaginationParams."""
+    return query.limit(pagination.per_page).offset((pagination.page - 1) * pagination.per_page)
+
+
+def safe_ilike(col, val: str):
+    """
+    ILIKE that works for both string and Enum columns by casting Enum values
+    to String before applying the pattern.
+    """
+    if isinstance(col.type, SQLAlchemyEnum):
+        return cast(col, String).ilike(f"%{val}%")
+    return col.ilike(f"%{val}%")
 
 
 def get_pagination_info(pagination: PaginationParams | None, total: int | None) -> dict[str, int | bool | None]:

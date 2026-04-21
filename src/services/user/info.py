@@ -4,9 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config.postgres.db_config import get_session
 from src.models.dbo.models import User
 from src.models.managers import UserManager
+from src.services.common import BaseService
 
 
-class UserInfoService:
+class UserInfoService(BaseService):
     def __init__(self, db: AsyncSession):
         self.db = db
         self.user_manager = UserManager(db)

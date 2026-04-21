@@ -1,21 +1,26 @@
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.logger import LoggerProvider
-
 from src.models.dbo.models import User
+from src.models.managers.common import BaseManager
 
 log = LoggerProvider().get_logger(__name__)
 
 
-class UserManager:
-    def __init__(self, db: AsyncSession):
-        self.db = db
+class UserManager(BaseManager):
+    entity = User
+
+    text_search_fields = {
+        "username": "ilike",
+        "email": "ilike",
+    }
 
     async def get_user_by_id(self, user_id: int) -> User | None:
-        return await self.db.get(User, user_id)
+        """Fetch a user by integer id. Alias of BaseManager.get_by_id for readability."""
+        return await self.get_by_id(user_id)
 
     async def get_users_by_filters(self, **filters) -> list[User]:
+        """Example of a custom query; prefer BaseManager.search + apply_filters for new managers."""
         query = select(User)
 
         for key, value in filters.items():

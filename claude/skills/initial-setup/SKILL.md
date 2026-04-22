@@ -31,7 +31,7 @@ If none of the modes applies and the user actually needs a new feature or model,
 
 Before touching anything, ask the user: is this **first-time setup**, **adding a service**, or **a diagnostic pass**?
 
-- **First-time setup** → walk through Step 1 to Step 6 in order.
+- **First-time setup** → walk through Step 1 to Step 7 in order.
 - **Adding a service** → jump straight to Step 3 (extra services) or Step 4 (authorization), depending on the request.
 - **Health-check** → follow every step as a checklist but do not change files without confirmation: find divergences first, then propose edits as a single list.
 
@@ -393,7 +393,315 @@ Extend the list as more public endpoints appear.
 
 ------------------------------------------------------------------------
 
-## Step 5 — Developer environment
+## Step 5 — Admin panel (SQLAdmin)
+
+The admin panel is optional. Enable it only when the user **explicitly requests it**.
+
+### 5.1 What to ask the user
+
+1. **Is an admin panel needed** (yes / no)? If no, skip this step.
+2. **Authentication method**: simple username + password from `.env` (default, no Keycloak required) or Keycloak `is_admin` flag (only when Keycloak is already configured in Step 4)?
+
+### 5.2 Dependencies
+
+Add to `requirements.txt`:
+
+```
+sqladmin==0.19.0
+openpyxl==3.1.3
+```
+
+### 5.3 Bootstrap the skeleton
+
+Create the following structure (empty `__init__.py` files where listed):
+
+```
+src/config/admin/
+├── __init__.py
+├── categories.py
+├── config.py
+├── custom_base.py
+└── model_admin/
+    ├── __init__.py
+    └── base_admin.py
+```
+
+### 5.4 `categories.py`
+
+Start with one constant per logical group; add more as models are created.
+
+```python
+USER_CATEGORY = "Users"
+```
+
+Category strings are **never** hardcoded inside a view class — always reference this module.
+
+### 5.5 `model_admin/base_admin.py`
+
+Copy this as-is. The search overrides support searching through related-model fields via dot notation (`"related.field"`) and multi-word search via `split_search_query`.
+
+```python
+from io import BytesIO
+from re import compile, MULTILINE
+from typing import Any, AsyncGenerator, List, Union
+
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from sqladmin import ModelView
+from sqladmin.helpers import Writer, secure_filename, stream_to_csv
+from sqlalchemy import Select, String, cast, or_
+from starlette.responses import StreamingResponse
+from urllib.parse import quote
+
+
+class BaseAdmin(ModelView):
+    can_create = True
+    can_edit = True
+    can_delete = True
+    can_view_details = True
+    export_types = ["csv", "xlsx"]
+
+    def _get_export_labels(self, export_prop_names: List[str]) -> List[str]:
+        return [
+            self.column_labels[item] if item in self.column_labels else item
+            for item in export_prop_names
+        ]
+
+    async def export_data(self, data: List[Any], export_type: str = "csv") -> StreamingResponse:
+        if export_type == "xlsx":
+            return await self._export_xlsx(data)
+        return await self._export_csv(data)
+
+    async def _export_xlsx(self, data: List[Any]) -> StreamingResponse:
+        wb = Workbook()
+        ws = wb.active
+        headers = self._get_export_labels(self._export_prop_names)
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+        for row in data:
+            vals = [str(await self.get_prop_value(row, name)) for name in self._export_prop_names]
+            ws.append(vals)
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        filename = quote(self.get_export_name(export_type="xlsx"))
+        return StreamingResponse(
+            content=buffer,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment;filename={filename}"},
+        )
+
+    async def _export_csv(self, data: List[Any]) -> StreamingResponse:
+        async def generate(writer: Writer) -> AsyncGenerator[Any, None]:
+            yield writer.writerow(self._get_export_labels(self._export_prop_names))
+            for row in data:
+                vals = [str(await self.get_prop_value(row, name)) for name in self._export_prop_names]
+                yield writer.writerow(vals)
+
+        filename = secure_filename(self.get_export_name(export_type="csv"))
+        return StreamingResponse(
+            content=stream_to_csv(generate),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment;filename={filename}"},
+        )
+
+    trim_spaces_regex = compile(r"^\s+|\s+$", MULTILINE)
+    column_search_outer_joins: List[str] = []
+
+    def search_query(self, stmt: Select, term: str) -> Select:
+        return self.search_query_custom(stmt, term, None)
+
+    def search_query_custom(self, stmt: Select, term: str, joined: Union[set, None]) -> Select:
+        if joined is None:
+            joined = set()
+        term = self.trim_spaces_regex.sub("", term)
+        expressions = []
+        for field in self._search_fields:
+            model = self.model
+            parts = field.split(".")
+            for part in parts[:-1]:
+                rel_class = getattr(model, part)
+                model = rel_class.mapper.class_
+                if part not in joined:
+                    if part in self.column_search_outer_joins:
+                        stmt = stmt.outerjoin(model)
+                    else:
+                        stmt = stmt.join(model)
+                    joined.add(part)
+            field = getattr(model, parts[-1])
+            expressions.append(cast(field, String).ilike(f"%{term}%"))
+        return stmt.filter(or_(*expressions))
+
+    def split_search_query(self, stmt: Select, term: str) -> Select:
+        terms = self.trim_spaces_regex.sub("", term).split(" ")
+        joined: set = set()
+        for term in terms:
+            stmt = self.search_query_custom(stmt, term, joined)
+        return stmt
+```
+
+### 5.6 `custom_base.py`
+
+A `sqladmin.Admin` subclass with per-object delete-error handling. Start with this; extend later as needed.
+
+```python
+from typing import Any
+from typing_extensions import override
+from urllib.parse import parse_qsl
+
+from fastapi import Response
+from sqladmin import Admin
+from sqladmin.authentication import login_required
+from starlette.datastructures import MultiDict, URL
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
+
+
+class MyAdmin(Admin):
+    @override
+    @login_required
+    async def delete(self, request: Request) -> Response:  # type: ignore[misc]
+        """Delete route with per-object error handling."""
+        await self._delete(request)
+
+        referer_url = URL(request.headers.get("referer", ""))
+        referer_params = MultiDict(parse_qsl(referer_url.query))
+
+        identity = request.path_params["identity"]
+        model_view = self._find_model_view(identity)
+
+        params = request.query_params.get("pks", "")
+        pks = params.split(",") if params else []
+        for pk in pks:
+            model = await model_view.get_object_for_delete(pk)
+            if not model:
+                raise HTTPException(status_code=404)
+            try:
+                await model_view.delete_model(request, pk)
+            except Exception as exc:
+                return Response(
+                    content=f"Error during deletion of {model_view.name}: {exc}",
+                    status_code=500,
+                )
+
+        url = URL(str(request.url_for("admin:list", identity=identity)))
+        url = url.include_query_params(**referer_params)
+        return Response(content=str(url))
+```
+
+### 5.7 Authentication
+
+Pick one variant based on the answer in 5.1.
+
+#### Variant A — simple username / password (no Keycloak)
+
+**Add to `AppConfig`** (`src/config/settings.py`):
+
+```python
+from typing import Optional
+
+admin_secret_key: str = "change-me-in-production"
+admin_username: Optional[str] = None
+admin_password: Optional[str] = None
+```
+
+**Add to `.env.example`:**
+
+```
+# Admin panel — simple auth (only when Keycloak is NOT used)
+ADMIN_SECRET_KEY=change-me-in-production  # Secret key for session signing; must be changed before deploy
+ADMIN_USERNAME=admin                       # Admin panel login
+ADMIN_PASSWORD=change-me-in-production    # Admin panel password; must be changed before deploy
+```
+
+**`config.py`:**
+
+```python
+from fastapi import FastAPI
+from sqladmin.authentication import AuthenticationBackend
+from starlette.requests import Request
+
+from src.config.admin.custom_base import MyAdmin
+from src.config.postgres.db_config import async_engine
+from src.config.settings import app_config
+
+# Import and register views here as they are added — see the create-model skill.
+# from src.config.admin.model_admin.user import UserAdmin
+
+
+class AdminAuth(AuthenticationBackend):
+    async def login(self, request: Request) -> bool:
+        form = await request.form()
+        if form["username"] == app_config.admin_username and form["password"] == app_config.admin_password:
+            request.session.update({"token": "authenticated"})
+            return True
+        return False
+
+    async def logout(self, request: Request) -> bool:
+        request.session.clear()
+        return True
+
+    async def authenticate(self, request: Request) -> bool:
+        return request.session.get("token") == "authenticated"
+
+
+def init_admin(app: FastAPI) -> None:
+    auth_backend = AdminAuth(secret_key=app_config.admin_secret_key)
+    admin = MyAdmin(app, async_engine, authentication_backend=auth_backend)
+    # admin.add_view(UserAdmin)
+```
+
+#### Variant B — Keycloak `is_admin` flag
+
+When Keycloak is already configured (Step 4), sqladmin's built-in auth is replaced by `AdminAccessMiddleware`. The full middleware implementation belongs to the `report-microservice` skill. Two mandatory adjustments here:
+
+1. **Bypass Keycloak for admin routes** — add this check inside `authenticate` in `src/middlewares/keycloak_middleware.py` so the Keycloak backend does not intercept admin traffic (admin has its own auth flow):
+
+```python
+if conn.url.path.startswith("/admin"):
+    return None
+```
+
+2. **`config.py` — omit the authentication backend:**
+
+```python
+from fastapi import FastAPI
+
+from src.config.admin.custom_base import MyAdmin
+from src.config.postgres.db_config import async_engine
+
+# from src.config.admin.model_admin.user import UserAdmin
+
+
+def init_admin(app: FastAPI) -> None:
+    admin = MyAdmin(app, async_engine)  # Keycloak AdminAccessMiddleware handles auth
+    # admin.add_view(UserAdmin)
+```
+
+### 5.8 Wire into `src/main.py`
+
+Add **after** all `app.add_middleware(...)` and `app.include_router(...)` calls:
+
+```python
+from src.config.admin.config import init_admin
+
+init_admin(app)
+```
+
+SQLAdmin mounts as a separate ASGI sub-application. Calling `init_admin` before middleware or routers causes ordering issues.
+
+### 5.9 Verify
+
+Open `http://<PROJECT_HOST>:<PROJECT_PORT>/admin`:
+- **Variant A**: the sqladmin login page appears; sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
+- **Variant B**: Keycloak redirects the browser; signing in as a user with `is_admin = true` opens the admin dashboard.
+
+The sidebar is empty until the first `admin.add_view(...)` call is added in `config.py` (via the `create-model` skill). This is expected.
+
+------------------------------------------------------------------------
+
+## Step 6 — Developer environment
 
 1. **Python 3.12+** installed; the virtual environment is ready:
    ```bash
@@ -416,7 +724,7 @@ For every missing piece give the user a concrete command — do not just say "in
 
 ------------------------------------------------------------------------
 
-## Step 6 — Final verification
+## Step 7 — Final verification
 
 Run in this order:
 
@@ -444,7 +752,8 @@ For a basic API smoke test, hit `GET /api/v1/healthcheck` (when it exists) or `G
 3. **PostgreSQL** is reachable, migrations applied, `make test` green.
 4. **Redis / Kafka / Taskiq** are enabled when the user asked for them; configs are copied from `assets/`, fields are added to `AppConfig` and `.env.example`, dependencies are in `requirements.txt`.
 5. **Keycloak** (when required): columns added to `User`, migration applied, middleware copied and wired into `src/main.py`, public routes listed in `PUBLIC_ROUTES`.
-6. **`requirements.txt`** reflects every new dependency.
+6. **SQLAdmin** (when requested): `src/config/admin/` skeleton is in place, `init_admin(app)` called last in `src/main.py`. Dependencies `sqladmin==0.19.0` and `openpyxl==3.1.3` in `requirements.txt`. For Variant A: `ADMIN_SECRET_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` in `AppConfig` and `.env.example`. For Variant B: `/admin` path excluded from Keycloak middleware.
+7. **`requirements.txt`** reflects every new dependency.
 7. **`make lint`** green.
 8. **`make test`** green, coverage ≥ 70%.
 9. **`make run`** brings the service up; Swagger opens and shows the correct title / version / routes.
@@ -472,6 +781,18 @@ The Taskiq broker and scheduler use Redis as their backend. Until Redis is up an
 ### A public endpoint still requires a token
 
 The Keycloak middleware applies to every route, including Swagger and healthcheck. Add them to `PUBLIC_ROUTES` / `PUBLIC_ROUTE_PREFIXES` inside `src/middlewares/keycloak_middleware.py`.
+
+### `init_admin` called before middleware or routers
+
+SQLAdmin mounts as a separate ASGI sub-application. If `init_admin(app)` is called before `app.add_middleware(...)` or `app.include_router(...)`, the admin sub-app may not see the main app's middleware. Always call `init_admin(app)` **last** in `src/main.py`.
+
+### Simple-auth credentials unchanged before deploy
+
+The defaults `change-me-in-production` for `ADMIN_SECRET_KEY` and `ADMIN_PASSWORD` are placeholders. Deploying without changing them is a security risk. Always set real values in `.env` before the first deploy.
+
+### Keycloak middleware intercepting admin routes (Variant B)
+
+When Keycloak middleware is enabled and the `/admin` path prefix is not excluded, every admin request gets rejected with 401. Add `if conn.url.path.startswith("/admin"): return None` to the `authenticate` method in `src/middlewares/keycloak_middleware.py`.
 
 ### Editing skill assets directly
 
